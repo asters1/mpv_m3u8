@@ -34,7 +34,7 @@ func clean() {
 }
 
 func GET(URL string, HEADER http.Header) (*http.Response, error) {
-	fmt.Println(URL)
+	fmt.Println("正在请求:" + URL)
 	client := &http.Client{}
 	requset, _ := http.NewRequest(
 		http.MethodGet,
@@ -64,7 +64,10 @@ func JX(path string, resp *http.Response) error {
 	// fmt.Println(string(body_bit))
 	// fmt.Println(resp.Header)
 	defer resp.Body.Close()
-	if resp.Header.Get("content-type") == "application/vnd.apple.mpegurl" {
+	// fmt.Println(resp.Request.URL)
+
+	if (resp.Header.Get("content-type") == "application/vnd.apple.mpegurl") || (strings.Index(resp.Request.URL.RequestURI(), ".m3u") != -1) {
+		// fmt.Println("====m3u8====")
 		KEY_SWITCH = false
 		TS_LIST = nil
 		TS_LIST_F = nil
@@ -100,8 +103,11 @@ func JX(path string, resp *http.Response) error {
 			}
 
 			if !(strings.HasPrefix(text, "#")) {
+				// if strings.HasPrefix(text, "http") {
+				// 	text = "http://localhost" + PROT + "/?url=" + text
+				// }
 				if strings.HasPrefix(text, "http") {
-					text = "http://localhos" + PROT + "/?url=" + text
+					text = "/" + text
 				}
 				TS_LIST[j] = text
 				TS_LIST_F[text] = j
@@ -158,7 +164,26 @@ func AES128Decrypt(crypted, key, iv []byte) ([]byte, error) {
 	return origData, nil
 }
 
-func DownloadTs(name string) {
+func IsExists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	} else {
+		return false
+	}
+}
+
+func DownloadTs(URL string, HEADER http.Header) {
+	uname := URL[strings.LastIndex(URL, "/")+1:]
+	if IsExists("./m3u8_cache/" + uname) {
+		return
+	}
+
+	resp, err := GET(URL, HEADER)
+	if err != nil {
+		return
+	}
+	JX("./m3u8_cache/"+uname, resp)
 }
 
 func MainInit() {
@@ -185,6 +210,10 @@ func main() {
 			URL_PATH = Url[:strings.LastIndex(Url, "/")+1]
 			if strings.Index(Url, ".m3u") != -1 {
 				clean()
+				TS_LIST = nil
+				TS_LIST_F = nil
+			} else {
+				fmt.Println("测试")
 			}
 			HEADER = c.Request.Header
 			resp, err := GET(Url, HEADER)
@@ -204,7 +233,28 @@ func main() {
 			c.File("./m3u8_cache/" + url_name)
 			return
 		} else {
-			u := URL_PATH + TS_PATH
+
+			index := TS_LIST_F[url_name]
+			// fmt.Println("测试:", index)
+			for i := 0; i < MAX; i++ {
+				u, t := TS_LIST[index+i]
+				// fmt.Println("t:", t)
+				if t {
+					// fmt.Println(u)
+					go DownloadTs(u, HEADER)
+					fmt.Println("进程")
+				}
+			}
+
+			// fmt.Println("URI_path:" + URL_PATH)
+			// fmt.Println("TS_PATH:" + TS_PATH)
+			u := ""
+			if strings.HasPrefix(TS_LIST[0], "/http") {
+				u = c.Request.URL.RequestURI()
+			} else {
+				u = URL_PATH + TS_PATH
+			}
+
 			resp, err := GET(u, HEADER)
 			if err != nil {
 				c.String(460, "网络请求失败!请检查你的网络或者URL~")
