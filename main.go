@@ -106,6 +106,30 @@ func JX(path string, resp *http.Response) error {
 
 		}
 	} else {
+
+		if KEY_SWITCH {
+			b, err := AES128Decrypt(body_bit, []byte(KEY), []byte(KEY_IV))
+			if err != nil {
+				return err
+			}
+			body_bit = b
+			// Some TS files do not start with SyncByte 0x47,
+			// 一些 ts 文件不以同步字节 0x47 开头，
+			//	they can not be played after merging,
+			// 合并后不能播放，
+			// Need to remove the bytes before the SyncByte 0x47(71).
+			// 需要删除同步字节 0x47(71) 之前的字节。
+		}
+
+		syncByte := uint8(71) // 0x47
+		bLen := len(body_bit)
+		for j := 0; j < bLen; j++ {
+			if body_bit[j] == syncByte {
+				//			fmt.Println(bytes[:j])
+				body_bit = body_bit[j:]
+				break
+			}
+		}
 		ioutil.WriteFile(path, body_bit, 0755)
 	}
 	return nil
