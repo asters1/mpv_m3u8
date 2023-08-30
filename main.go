@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -24,6 +25,7 @@ var (
 	KEY_SWITCH bool
 	TS_LIST    map[int]string
 	TS_LIST_F  map[string]int
+	TS_PATH    string
 )
 
 func clean() {
@@ -32,6 +34,7 @@ func clean() {
 }
 
 func GET(URL string, HEADER http.Header) (*http.Response, error) {
+	fmt.Println(URL)
 	client := &http.Client{}
 	requset, _ := http.NewRequest(
 		http.MethodGet,
@@ -58,6 +61,8 @@ func parseLineParameters(line string) map[string]string {
 
 func JX(path string, resp *http.Response) error {
 	body_bit, _ := ioutil.ReadAll(resp.Body)
+	// fmt.Println(string(body_bit))
+	// fmt.Println(resp.Header)
 	defer resp.Body.Close()
 	if resp.Header.Get("content-type") == "application/vnd.apple.mpegurl" {
 		KEY_SWITCH = false
@@ -168,6 +173,13 @@ func main() {
 	r.GET("/*all", func(c *gin.Context) {
 		pa := c.Request.URL.RequestURI()
 		url_name := pa[strings.LastIndex(pa, "/")+1:]
+		count := strings.Count(pa, "/")
+		if count > 1 && !(strings.HasPrefix(pa, "/http")) {
+			TS_PATH = pa[1:]
+		} else {
+			TS_PATH = url_name
+		}
+		fmt.Println("=====\nTS-Path:" + TS_PATH + "\n=======")
 		Url := strings.TrimSpace(c.Query("url"))
 		if Url != "" {
 			URL_PATH = Url[:strings.LastIndex(Url, "/")+1]
@@ -192,7 +204,7 @@ func main() {
 			c.File("./m3u8_cache/" + url_name)
 			return
 		} else {
-			u := URL_PATH + url_name
+			u := URL_PATH + TS_PATH
 			resp, err := GET(u, HEADER)
 			if err != nil {
 				c.String(460, "网络请求失败!请检查你的网络或者URL~")
