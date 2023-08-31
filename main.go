@@ -193,6 +193,19 @@ func GET(URL string, HEADER http.Header) (*http.Response, error) {
 	return resp, nil
 }
 
+func DownloadTs(URL string, HEADER http.Header) {
+	uname := URL[strings.LastIndex(URL, "/")+1:]
+	if IsExists("./m3u8_cache/" + uname) {
+		return
+	}
+
+	resp, err := GET(URL, HEADER)
+	if err != nil {
+		return
+	}
+	JX("./m3u8_cache/"+uname, resp)
+}
+
 func main() {
 	MainInit()
 	r := gin.Default()
@@ -225,6 +238,23 @@ func main() {
 			c.File("./m3u8_cache/" + File_Name)
 			return
 		} else {
+			c.Header("content-type", "video/mp2t")
+			index := TS_LIST_F[REQ_URI]
+			// fmt.Println(index)
+			for i := 0; i < MAX; i++ {
+				u, t := TS_LIST[index+i]
+				// fmt.Println("t:", t)
+				if t {
+					// fmt.Println(u)
+					go DownloadTs(u, HEADER)
+					fmt.Println("进程")
+				}
+			}
+			if IsExists("./m3u8_cache/" + File_Name) {
+				c.File("./m3u8_cache/" + File_Name)
+				return
+			}
+
 			resp, err := GET(REQ_URI, HEADER)
 			if err != nil {
 				fmt.Println(err.Error())
