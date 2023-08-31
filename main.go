@@ -102,7 +102,7 @@ func JX(path string, resp *http.Response) error {
 		defer f.Close()
 		m3u8_slice := strings.Split(string(body_bit), "\n")
 		for i := 0; i < len(m3u8_slice); i++ {
-			text := strings.TrimSpace(m3u8_slice[i])
+			text := strings.TrimSpace(strings.TrimSpace(m3u8_slice[i]))
 			if (!(KEY_SWITCH)) && (strings.HasPrefix(text, "#EXT-X-KEY")) {
 				KEY_SWITCH = true
 				m := parseLineParameters(text)
