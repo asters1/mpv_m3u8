@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -80,18 +81,25 @@ var (
 	// TS的顺查和逆查
 	TS_LIST   map[int]string
 	TS_LIST_F map[string]int
+	// 获得m3u8时的TIME
+	GET_M3U8_TIME int
+	// 解析m3u8时复制TIME
+	GET_TS_TIME int
 )
 
 func MainInit() {
 	clean()
 	MAX = 5
 	PROT = ":8081"
+	GET_M3U8_TIME = 0
+	GET_TS_TIME = 0
 }
 
 func JX(path string, resp *http.Response) error {
 	body_bit, _ := ioutil.ReadAll(resp.Body)
 	defer resp.Body.Close()
 	if (resp.Header.Get("content-type") == "application/vnd.apple.mpegurl") || (strings.Index(resp.Request.URL.RequestURI(), ".m3u") != -1) {
+		GET_TS_TIME = GET_M3U8_TIME
 		KEY_SWITCH = false
 		TS_LIST = nil
 		TS_LIST_F = nil
@@ -138,6 +146,9 @@ func JX(path string, resp *http.Response) error {
 			f.WriteString(text + "\n")
 		}
 	} else {
+		if GET_M3U8_TIME != GET_TS_TIME {
+			return nil
+		}
 		if KEY_SWITCH {
 			b, err := AES128Decrypt(body_bit, []byte(KEY), []byte(KEY_IV))
 			if err != nil {
@@ -215,6 +226,7 @@ func main() {
 		File_Name := REQ_URI[strings.LastIndex(REQ_URI, "/")+1:]
 		Url := strings.TrimSpace(c.Query("url"))
 		if Url != "" {
+			GET_M3U8_TIME = int(time.Now().UnixNano())
 			// 清空./m3u8_cache/
 			clean()
 			// 重置URL_PATH,TS_LIST,TS_LIST_F
