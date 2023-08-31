@@ -13,39 +13,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var (
-	MAX        int
-	PROT       string
-	URL_PATH   string
-	HEADER     http.Header
-	KEY        string
-	KEY_METHOD string
-	KEY_URI    string
-	KEY_IV     string
-	KEY_SWITCH bool
-	TS_LIST    map[int]string
-	TS_LIST_F  map[string]int
-	TS_PATH    string
-)
-
 func clean() {
 	os.RemoveAll("./m3u8_cache/")
 	os.MkdirAll("./m3u8_cache", 0755)
-}
-
-func GET(URL string, HEADER http.Header) (*http.Response, error) {
-	fmt.Println("正在请求:" + URL)
-	client := &http.Client{}
-	requset, _ := http.NewRequest(
-		http.MethodGet,
-		URL,
-		nil,
-	)
-	resp, err := client.Do(requset)
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
 }
 
 // 解析URI和IV
@@ -59,15 +29,69 @@ func parseLineParameters(line string) map[string]string {
 	return params
 }
 
+func AES128Decrypt(crypted, key, iv []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	blockSize := block.BlockSize()
+	if len(iv) == 0 {
+		iv = key
+	}
+	blockMode := cipher.NewCBCDecrypter(block, iv[:blockSize])
+	origData := make([]byte, len(crypted))
+	blockMode.CryptBlocks(origData, crypted)
+	length := len(origData)
+	unPadding := int(origData[length-1])
+	origData = origData[:(length - unPadding)]
+	return origData, nil
+}
+
+func IsExists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	} else {
+		return false
+	}
+}
+
+var (
+	// 除去host的所有路径，第一个字符为/
+	REQ_URI string
+	// URL从开头到最后/的路径，最后一个字符为/
+	URL_PATH string
+	// 最大进程数
+	MAX int
+	// gin的端口
+	PROT string
+	// 请求头
+	HEADER http.Header
+	// m3u8的KEY需要请求得到
+	KEY string
+	// m3u8的方法，一般为NONE或者AES-128
+	KEY_METHOD string
+	// m3u8的地址
+	KEY_URI string
+	// m3u8的偏移量
+	KEY_IV string
+	// 是否有KEY
+	KEY_SWITCH bool
+	// TS的顺查和逆查
+	TS_LIST   map[int]string
+	TS_LIST_F map[string]int
+)
+
+func MainInit() {
+	clean()
+	MAX = 5
+	PROT = ":8081"
+}
+
 func JX(path string, resp *http.Response) error {
 	body_bit, _ := ioutil.ReadAll(resp.Body)
-	// fmt.Println(string(body_bit))
-	// fmt.Println(resp.Header)
 	defer resp.Body.Close()
-	// fmt.Println(resp.Request.URL)
-
 	if (resp.Header.Get("content-type") == "application/vnd.apple.mpegurl") || (strings.Index(resp.Request.URL.RequestURI(), ".m3u") != -1) {
-		// fmt.Println("====m3u8====")
 		KEY_SWITCH = false
 		TS_LIST = nil
 		TS_LIST_F = nil
@@ -101,23 +125,19 @@ func JX(path string, resp *http.Response) error {
 				}
 				text = ""
 			}
-
 			if !(strings.HasPrefix(text, "#")) {
-				// if strings.HasPrefix(text, "http") {
-				// 	text = "http://localhost" + PROT + "/?url=" + text
-				// }
-				if strings.HasPrefix(text, "http") {
-					text = "/" + text
+				if (strings.HasPrefix(text, "http")) || (!strings.HasPrefix(text, "/")) {
+					if text != "" {
+						text = "/" + text
+					}
 				}
 				TS_LIST[j] = text
 				TS_LIST_F[text] = j
 				j++
 			}
 			f.WriteString(text + "\n")
-
 		}
 	} else {
-
 		if KEY_SWITCH {
 			b, err := AES128Decrypt(body_bit, []byte(KEY), []byte(KEY_IV))
 			if err != nil {
@@ -146,129 +166,85 @@ func JX(path string, resp *http.Response) error {
 	return nil
 }
 
-func AES128Decrypt(crypted, key, iv []byte) ([]byte, error) {
-	block, err := aes.NewCipher(key)
+func GET(URL string, HEADER http.Header) (*http.Response, error) {
+	// fmt.Println("GET()==:" + URL)
+	if strings.HasPrefix(URL, "/") {
+		if strings.HasPrefix(URL, "/http") {
+			URL = URL[1:]
+		} else {
+			URL = URL_PATH + URL[1:]
+		}
+	} else if !strings.HasPrefix(URL, "http") {
+		err := fmt.Errorf("URL格式不正确!!\nURL:" + URL)
+		// fmt.Println(err)
+		return nil, err
+	}
+
+	client := &http.Client{}
+	requset, _ := http.NewRequest(
+		http.MethodGet,
+		URL,
+		nil,
+	)
+	resp, err := client.Do(requset)
 	if err != nil {
 		return nil, err
 	}
-	blockSize := block.BlockSize()
-	if len(iv) == 0 {
-		iv = key
-	}
-	blockMode := cipher.NewCBCDecrypter(block, iv[:blockSize])
-	origData := make([]byte, len(crypted))
-	blockMode.CryptBlocks(origData, crypted)
-	length := len(origData)
-	unPadding := int(origData[length-1])
-	origData = origData[:(length - unPadding)]
-	return origData, nil
-}
-
-func IsExists(path string) bool {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true
-	} else {
-		return false
-	}
-}
-
-func DownloadTs(URL string, HEADER http.Header) {
-	uname := URL[strings.LastIndex(URL, "/")+1:]
-	if IsExists("./m3u8_cache/" + uname) {
-		return
-	}
-
-	resp, err := GET(URL, HEADER)
-	if err != nil {
-		return
-	}
-	JX("./m3u8_cache/"+uname, resp)
-}
-
-func MainInit() {
-	clean()
-	MAX = 5
-	PROT = ":8081"
+	return resp, nil
 }
 
 func main() {
 	MainInit()
 	r := gin.Default()
 	r.GET("/*all", func(c *gin.Context) {
-		pa := c.Request.URL.RequestURI()
-		url_name := pa[strings.LastIndex(pa, "/")+1:]
-		count := strings.Count(pa, "/")
-		if count > 1 && !(strings.HasPrefix(pa, "/http")) {
-			TS_PATH = pa[1:]
-		} else {
-			TS_PATH = url_name
-		}
-		fmt.Println("=====\nTS-Path:" + TS_PATH + "\n=======")
+		REQ_URI = c.Request.URL.RequestURI()
+
+		File_Name := REQ_URI[strings.LastIndex(REQ_URI, "/")+1:]
 		Url := strings.TrimSpace(c.Query("url"))
 		if Url != "" {
+			// 清空./m3u8_cache/
+			clean()
+			// 重置URL_PATH,TS_LIST,TS_LIST_F
 			URL_PATH = Url[:strings.LastIndex(Url, "/")+1]
-			if strings.Index(Url, ".m3u") != -1 {
-				clean()
-				TS_LIST = nil
-				TS_LIST_F = nil
-			} else {
-				fmt.Println("测试")
-			}
+			TS_LIST = nil
+			TS_LIST_F = nil
+			// 获得请求头
 			HEADER = c.Request.Header
 			resp, err := GET(Url, HEADER)
 			if err != nil {
-				c.String(460, "网络请求失败!请检查你的网络或者URL~")
-				return
+				// fmt.Println(err)
+				if err != nil {
+					fmt.Println(err.Error())
+					c.String(460, err.Error())
 
-			}
-			err = JX("./m3u8_cache/"+url_name, resp)
-			if err != nil {
-				c.String(460, "网络请求失败!请检查你的网络或者URL~")
-				return
-			}
-
-			c.Header("Content-Length", "-1")
-			c.Request.Header.Del("Range")
-			c.File("./m3u8_cache/" + url_name)
-			return
-		} else {
-
-			index := TS_LIST_F[url_name]
-			// fmt.Println("测试:", index)
-			for i := 0; i < MAX; i++ {
-				u, t := TS_LIST[index+i]
-				// fmt.Println("t:", t)
-				if t {
-					// fmt.Println(u)
-					go DownloadTs(u, HEADER)
-					fmt.Println("进程")
+					return
 				}
 			}
-
-			// fmt.Println("URI_path:" + URL_PATH)
-			// fmt.Println("TS_PATH:" + TS_PATH)
-			u := ""
-			if strings.HasPrefix(TS_LIST[0], "/http") {
-				u = c.Request.URL.RequestURI()
-			} else {
-				u = URL_PATH + TS_PATH
-			}
-
-			resp, err := GET(u, HEADER)
+			err = JX("./m3u8_cache/"+File_Name, resp)
+			c.Request.Header.Del("Range")
+			c.File("./m3u8_cache/" + File_Name)
+			return
+		} else {
+			resp, err := GET(REQ_URI, HEADER)
 			if err != nil {
-				c.String(460, "网络请求失败!请检查你的网络或者URL~")
+				fmt.Println(err.Error())
+				c.String(460, err.Error())
 				return
 
 			}
-			err = JX("./m3u8_cache/"+url_name, resp)
+			err = JX("./m3u8_cache/"+File_Name, resp)
 			if err != nil {
-				c.String(460, "网络请求失败!请检查你的网络或者URL~")
+				fmt.Println(err.Error())
+				c.String(460, err.Error())
 				return
 			}
-			c.File("./m3u8_cache/" + url_name)
+			c.Request.Header.Del("Range")
+			c.File("./m3u8_cache/" + File_Name)
+			return
 		}
-	})
 
+		// fmt.Println(HEADER)
+		// c.String(200, "REQ_URI:"+REQ_URI+"\nFile_Name:"+File_Name+"\nURL_PATH:"+URL_PATH)
+	})
 	r.Run(PROT)
 }
